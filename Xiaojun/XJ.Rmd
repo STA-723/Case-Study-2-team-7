@@ -1,0 +1,193 @@
+---
+title: "XJ"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r echo=FALSE, message=F, warning=F}
+library(readr)
+library(visdat)
+library(naniar)
+library(dplyr)
+library(corrplot)
+library(ggplot2)
+library(ggthemes)
+library(wordcloud)
+library(BAS)
+AB_NYC_2019 <- read_csv("AB_NYC_2019.csv")
+```
+
+### Missing data
+
+- We have about 20% missing in last-review (date) and reviews/ month
+  - mainly in Brooklyn and Manhattan
+  - impute the data or take complete cases (PMM)
+- Modified last_review, as the number of days till 2020-01-01
+
+```{r message = F, warning=F}
+vis_miss(AB_NYC_2019)
+gg_miss_var(AB_NYC_2019,facet = neighbourhood_group) ### evenly missing
+table(AB_NYC_2019$neighbourhood_group)
+
+AB_NYC_2019$neighbourhood_group<- as.factor(AB_NYC_2019$neighbourhood_group)
+AB_NYC_2019$neighbourhood<- as.factor(AB_NYC_2019$neighbourhood)
+AB_NYC_2019$room_type<- as.factor(AB_NYC_2019$room_type)
+
+now<- as.Date("2020-01-01")
+AB_NYC_2019$last_review<- as.numeric(gsub("([0-9]+).*$", "\\1", now-AB_NYC_2019$last_review))
+
+min(AB_NYC_2019$last_review, na.rm = T)
+```
+
+### Correlation
+
+```{r}
+corr_check<- AB_NYC_2019 %>% mutate(neighbourhood_group = as.numeric(neighbourhood_group), neighbourhood = as.numeric(neighbourhood), room_type = as.numeric(room_type))
+corr_check<- corr_check %>% select(-c(id, name, host_id, host_name, last_review))
+                                    
+corr=cor(as.matrix(na.omit(corr_check)))
+corrplot(corr,number.cex=.8, upper="ellipse")
+```
+
+### plots for covariates
+
+- Distribution for price is right skewed, could us log(price)
+- could use reviews/ month to quantify popularity
+  - Again, right skewed, could use log scale
+
+```{r}
+max(AB_NYC_2019$price)
+hist(AB_NYC_2019$price)
+hist(log(AB_NYC_2019$price))
+
+hist(AB_NYC_2019$reviews_per_month)
+hist(log(AB_NYC_2019$reviews_per_month))
+
+### Price as response
+qplot(x = log(minimum_nights), y = log(AB_NYC_2019$price), data=AB_NYC_2019, color = factor(neighbourhood_group)) ### Manhattan higher than Brooklyn
+qplot(x = log(number_of_reviews), y = log(AB_NYC_2019$price), data=AB_NYC_2019, color = factor(neighbourhood_group)) ### Manhattan higher than Queens, Staten Island
+qplot(x = log(calculated_host_listings_count), y = log(AB_NYC_2019$price), data=AB_NYC_2019, color = factor(neighbourhood_group)) ### Similar results, no surprise
+
+### reviews/ month as response
+qplot(x = log(minimum_nights), y = log(AB_NYC_2019$reviews_per_month), data=AB_NYC_2019, color = factor(neighbourhood_group))
+qplot(x = log(calculated_host_listings_count), y = log(AB_NYC_2019$reviews_per_month), data=AB_NYC_2019, color = factor(neighbourhood_group)) 
+
+ggplot(AB_NYC_2019,aes(x=room_type,y=log(price),color=neighbourhood_group))+geom_boxplot()+theme_bw()
+ggplot(AB_NYC_2019,aes(x=neighbourhood_group,y=log(price),color=room_type))+geom_boxplot()+theme_bw()
+
+ggplot(AB_NYC_2019,aes(x=neighbourhood_group,y=log(number_of_reviews),color=room_type))+geom_boxplot()+theme_bw() ### heterogeneity
+
+```
+
+### remove price with 0
+### 1. spatial analysis
+2. text analysis (feature hashing)
+3. HT (no.3)
+4. XGBOOST, shap
+
+listing might be a good pred
+
+Questions:
+1. number of listing? 
+2. avaliablity 
+
+
+### Text Analysis
+
+```{r}
+library(FeatureHashing)
+AB_NYC_2019_complete<- AB_NYC_2019[complete.cases(AB_NYC_2019), ]
+
+set.seed(1234)
+subset<- sample(1:nrow(AB_NYC_2019_complete),10000)
+
+##smaller set 
+AB_subset<- AB_NYC_2019_complete[subset,]
+```
+
+### Feature Hashing
+
+```{r}
+hash.df <- hashed.model.matrix(~ split(name, delim = " ", type = "tf-idf"),
+                          data = AB_subset, hash.size = 2^9, signed.hash = FALSE)
+
+hash.df<- as.data.frame(as.matrix(hash.df))
+hash.df$price<-AB_subset$price
+train<- sample(1:nrow(hash.df),(0.7*nrow(hash.df)))
+train.df<- hash.df[train,]
+test.df<- hash.df[-train,]
+```
+
+#most frequent and least frequent words
+
+```{r}
+library(tm)
+sourceData <- VectorSource(AB_subset$name)
+corpus <- Corpus(sourceData)
+
+corpus <- tm_map(corpus, content_transformer(tolower)) # convert to lowercase
+#corpus <- tm_map(corpus, removeNumbers) # remove digits
+corpus <- tm_map(corpus, removePunctuation) # remove punctuation
+corpus <- tm_map(corpus, stripWhitespace) # strip extra whitespace
+corpus <- tm_map(corpus, removeWords, stopwords('english')) # remove stopwords, such as "a", "the", "at", etc.
+
+tdm <- DocumentTermMatrix(corpus)
+
+# Subset by words with a frequency 
+keepterm <- findFreqTerms(tdm, lowfreq = 20, highfreq = Inf)
+tdm2 <- tdm[,keepterm]
+
+#Create a data frame with corpus data.
+tdm2 <- as.data.frame(as.matrix(tdm2))
+
+# Add rating to tdm2 data frame
+tdm2$price <- AB_subset$price
+
+# Changing names so Random Forest will be my friend
+#colnames(tdm2)[colnames(tdm2)=="else"] <- "else.o"
+#colnames(tdm2)[colnames(tdm2)=="next"] <- "next.o"
+#colnames(tdm2)[colnames(tdm2)=="break"] <- "break.o"
+
+# Subset into Train and Test 
+set.seed(12345)
+split <- sample(nrow(tdm2), floor(0.7*nrow(tdm2)))
+tdm2Train <-tdm2[split,]
+tdm2Test <- tdm2[-split,]
+```
+
+```{r}
+colS <- colSums(as.matrix(tdm))
+doc_features <- data.table::data.table(name = attributes(colS)$names, count = colS)
+
+#most frequent and least frequent words
+doc_features[order(-count)][1:10] #top 10 most frequent words
+doc_features[order(count)][1:10] #least 10 frequent words
+
+ggplot(doc_features[count>500],aes(name, count)) +geom_bar(stat = "identity",fill='lightblue',color='black')+theme(axis.text.x = element_text(angle = 45, hjust = 1))+theme_economist()+scale_color_economist()
+
+wordcloud(names(colS), colS, min.freq = 300, scale = c(6,.1), colors = brewer.pal(6, 'Dark2'))
+```
+
+### Modeling
+### Feature hashed data
+```{r}
+#Time the creationg of the Linear Model
+st <- Sys.time()
+mod.lm <- lm(price~.,data=train.df)
+end <- Sys.time();
+
+hashed.lm.time<- end - st
+
+# Predict on testing data
+pred<- predict(mod.lm,newdata=test.df)
+test.df$pred.lm <- pred
+
+
+age.bas = bas.lm(price~ ., prior = 'JZS', modelprior=uniform(), method="MCMC", pivot=TRUE,  # for non-full rank case
+                   n.models=50000,
+                   force.heredity = TRUE, data = AB_subset)
+summary(age.bas)
+```
