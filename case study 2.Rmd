@@ -1,0 +1,76 @@
+---
+title: "Case Study 2"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r}
+library(ggplot2)
+library(ggmap)
+library(tigris)
+library(dplyr)
+library(leaflet)
+library(sp)
+library(ggmap)
+library(maptools)
+library(broom)
+library(httr)
+library(rgdal)
+library(broom)
+library(geosphere)
+rm(list=ls())
+data=read.csv(url('https://raw.githubusercontent.com/STA-723/Case-Study-2-team-7/master/AB_NYC_2019.csv'))
+summary(data)
+dim(data) ## 48895*16
+## NA's: only in reviews_per_month, 10052/48895=20%
+data$id=factor(data$id)
+data$host_id=factor(data$host_id)
+length(unique(data$host_id))
+length(unique(data$id))
+plot(data$longitude,data$latitude)
+df=data
+lat=data$latitude
+lon=data$longitude
+#transform to cartesian on sphere
+df$x=cos(lat) * cos(lon)
+df$y = cos(lat) * sin(lon)
+df$z = sin(lat) 
+# qmplot(latitude,longitude,data=df,zoom = 14)
+summary(df)
+plot(table(factor(df$price)))
+hist(log10(df$price)) ## looks like log normal
+quantile(df$price,c(0.05,seq(0.1,0.9,0.1),0.95,0.99,0.999))
+sum(df$price==0) ## 11 zero prices
+ggplot(df, aes(x=neighbourhood_group, y=log10(price), fill=room_type)) + 
+    geom_boxplot()
+```
+Calculate pair-wise spherical distance
+```{r spherial distance and pcoa}
+loc=cbind(lon,lat)
+# dist_spherical=matrix(0,nrow=nrow(loc),ncol=nrow(loc))
+## Error: vector memory exhausted (limit reached?)
+# for (i in 1:nrow(loc)){
+#   for (j in i:nrow(loc)){
+#     dist_sph[i,j]=distVincentyEllipsoid(loc[i,],loc[j,])
+#   }
+# }
+```   
+
+A simple map
+```{r}
+set.seed(1)
+rand=sample(1:nrow(loc),5000)
+loc_rand=loc[rand,]
+col=log10(df$price)[rand]
+dfrand=df[rand,]
+dfrand$room_type=factor(dfrand$room_type)
+ggplot(dfrand,aes(x=longitude, y=latitude, col=log(price)))+geom_point()+scale_color_gradient(low="green", high="red")
+plot(loc[rand,],cex=1, pch=20, col=col,main='price')
+```
+
+```{r}
+summary(df)
+lm1=lm(log10(1+price)~.-1-id-host_id-host_name-x-y-z,data=df)
+lm1
+```

@@ -17,7 +17,9 @@ library(ggplot2)
 library(ggthemes)
 library(wordcloud)
 library(BAS)
-AB_NYC_2019 <- read_csv("AB_NYC_2019.csv")
+library(MASS)
+AB_NYC_2019 <- read_csv("C:/Users/XJ/OneDrive - Duke University/STA-723/Case-Study-2-team-7/AB_NYC_2019.csv")
+
 ```
 
 ### Missing data
@@ -102,7 +104,7 @@ library(FeatureHashing)
 AB_NYC_2019_complete<- AB_NYC_2019[complete.cases(AB_NYC_2019), ]
 
 set.seed(1234)
-subset<- sample(1:nrow(AB_NYC_2019_complete),10000)
+subset<- sample(1:nrow(AB_NYC_2019_complete),nrow(AB_NYC_2019_complete))
 
 ##smaller set 
 AB_subset<- AB_NYC_2019_complete[subset,]
@@ -110,18 +112,23 @@ AB_subset<- AB_NYC_2019_complete[subset,]
 
 ### Feature Hashing
 
-```{r}
+```{r cache=TRUE}
+#hash.size(AB_subset)
 hash.df <- hashed.model.matrix(~ split(name, delim = " ", type = "tf-idf"),
-                          data = AB_subset, hash.size = 2^9, signed.hash = FALSE)
+                          data = AB_subset, hash.size = 2^11, signed.hash = FALSE, create.mapping = TRUE)
+
+hash_mapping<- hash.mapping(hash.df)
+
 
 hash.df<- as.data.frame(as.matrix(hash.df))
 hash.df$price<-AB_subset$price
-train<- sample(1:nrow(hash.df),(0.7*nrow(hash.df)))
-train.df<- hash.df[train,]
-test.df<- hash.df[-train,]
+#train<- sample(1:nrow(hash.df),(0.7*nrow(hash.df)))
+#train.df<- hash.df[train,]
+#test.df<- hash.df[-train,]
+
 ```
 
-#most frequent and least frequent words
+# most frequent and least frequent words
 
 ```{r}
 library(tm)
@@ -130,14 +137,14 @@ corpus <- Corpus(sourceData)
 
 corpus <- tm_map(corpus, content_transformer(tolower)) # convert to lowercase
 #corpus <- tm_map(corpus, removeNumbers) # remove digits
-corpus <- tm_map(corpus, removePunctuation) # remove punctuation
-corpus <- tm_map(corpus, stripWhitespace) # strip extra whitespace
+#corpus <- tm_map(corpus, removePunctuation) # remove punctuation
+#corpus <- tm_map(corpus, stripWhitespace) # strip extra whitespace
 corpus <- tm_map(corpus, removeWords, stopwords('english')) # remove stopwords, such as "a", "the", "at", etc.
 
 tdm <- DocumentTermMatrix(corpus)
 
 # Subset by words with a frequency 
-keepterm <- findFreqTerms(tdm, lowfreq = 20, highfreq = Inf)
+keepterm <- findFreqTerms(tdm, lowfreq = 8, highfreq = Inf)
 tdm2 <- tdm[,keepterm]
 
 #Create a data frame with corpus data.
@@ -152,10 +159,10 @@ tdm2$price <- AB_subset$price
 #colnames(tdm2)[colnames(tdm2)=="break"] <- "break.o"
 
 # Subset into Train and Test 
-set.seed(12345)
-split <- sample(nrow(tdm2), floor(0.7*nrow(tdm2)))
-tdm2Train <-tdm2[split,]
-tdm2Test <- tdm2[-split,]
+#set.seed(12345)
+#split <- sample(nrow(tdm2), floor(0.7*nrow(tdm2)))
+#tdm2Train <-tdm2[split,]
+#tdm2Test <- tdm2[-split,]
 ```
 
 ```{r}
@@ -172,22 +179,70 @@ wordcloud(names(colS), colS, min.freq = 300, scale = c(6,.1), colors = brewer.pa
 ```
 
 ### Modeling
+
 ### Feature hashed data
 ```{r}
 #Time the creationg of the Linear Model
 st <- Sys.time()
-mod.lm <- lm(price~.,data=train.df)
+mod.lm <- lm(price~.,data=hash.df)
 end <- Sys.time();
 
 hashed.lm.time<- end - st
 
 # Predict on testing data
-pred<- predict(mod.lm,newdata=test.df)
-test.df$pred.lm <- pred
-
-
-age.bas = bas.lm(price~ ., prior = 'JZS', modelprior=uniform(), method="MCMC", pivot=TRUE,  # for non-full rank case
-                   n.models=50000,
-                   force.heredity = TRUE, data = AB_subset)
-summary(age.bas)
+#pred<- predict(mod.lm,newdata=test.df)
+#test.df$pred.lm <- pred
+summary(mod.lm) ### not able to tell the coefficents o corresponds to which word
 ```
+
+### Feature non-hashed data (Frequency based)
+
+Should we include the other predictors for controlling? The top 10 words do not seem to be important (expect luxury)?
+```{r}
+library(lm.beta)
+#Time the creationg of the Linear Model
+st <- Sys.time()
+mod.lm_freq <- lm(price~.,data=tdm2)
+end <- Sys.time();
+
+freq.lm.time<- end - st
+
+# Predict on testing data
+#pred<- predict(mod.lm_freq,newdata=tdm2Test)
+#tdm2Test$pred.lm <- pred
+summary(mod.lm_freq)
+
+st_coef<- lm.beta(mod.lm_freq)
+st_coef$standardized.coefficients[order(st_coef$standardized.coefficients, decreasing = T)[1:10]] 
+
+#stepAIC(mod.lm_freq, direction="both") ### quite slow
+
+### Throw in other predictors\
+tdm2_other<- tdm2
+tdm2_other$neighbourhood_group_ori<-AB_subset$neighbourhood_group
+tdm2_other$room_type_ori<-AB_subset$room_type
+tdm2_other$minimum_night_ori<-AB_subset$minimum_nights
+tdm2_other$numer_of_reviews_ori<-AB_subset$number_of_reviews
+tdm2_other$last_review_ori<-AB_subset$last_review
+tdm2_other$reviews_per_month_ori<-AB_subset$reviews_per_month
+tdm2_other$calculated_host_listings_count_ori<-AB_subset$calculated_host_listings_count
+tdm2_other$availablity_365_ori<-AB_subset$availability_365
+
+
+### I only include the words which appear at leasr 8 times. 
+
+mod.lm_freq_other<- lm(price~.,data=tdm2_other)
+coef_other<- summary(mod.lm_freq_other)
+coef_other<- as.data.frame(coef_other$coefficients)
+
+
+coef_other_sort<- coef_other[order(coef_other$Estimate, decreasing = T),]
+coef_other_sort[1:15,]
+
+st_coef_other<- lm.beta(mod.lm_freq_other)
+st_coef_other$standardized.coefficients[order(st_coef_other$standardized.coefficients, decreasing = T)[1:20]] 
+
+### check the original names which include the important words
+AB_NYC_2019$name[grep("event", AB_NYC_2019$name, ignore.case=TRUE)]
+```
+
