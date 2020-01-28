@@ -80,9 +80,12 @@ qplot(x = log(minimum_nights), y = log(AB_NYC_2019$reviews_per_month), data=AB_N
 qplot(x = log(calculated_host_listings_count), y = log(AB_NYC_2019$reviews_per_month), data=AB_NYC_2019, color = factor(neighbourhood_group)) 
 
 ggplot(AB_NYC_2019,aes(x=room_type,y=log(price),color=neighbourhood_group))+geom_boxplot()+theme_bw()
+
 ggplot(AB_NYC_2019,aes(x=neighbourhood_group,y=log(price),color=room_type))+geom_boxplot()+theme_bw()
 
 ggplot(AB_NYC_2019,aes(x=neighbourhood_group,y=log(number_of_reviews),color=room_type))+geom_boxplot()+theme_bw() ### heterogeneity
+
+
 
 ```
 
