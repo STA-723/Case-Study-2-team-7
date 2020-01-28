@@ -1,6 +1,8 @@
 ---
 title: "XJ"
-output: pdf_document
+output:
+  html_document:
+    df_print: paged
 ---
 
 ```{r setup, include=FALSE}
@@ -29,7 +31,7 @@ AB_NYC_2019 <- read_csv("C:/Users/XJ/OneDrive - Duke University/STA-723/Case-Stu
   - impute the data or take complete cases (PMM)
 - Modified last_review, as the number of days till 2020-01-01
 
-```{r message = F, warning=F}
+```{r message = F, warning=F, cache=TRUE}
 vis_miss(AB_NYC_2019)
 gg_miss_var(AB_NYC_2019,facet = neighbourhood_group) ### evenly missing
 table(AB_NYC_2019$neighbourhood_group)
@@ -60,7 +62,7 @@ corrplot(corr,number.cex=.8, upper="ellipse")
 - could use reviews/ month to quantify popularity
   - Again, right skewed, could use log scale
 
-```{r}
+```{r cache=TRUE}
 max(AB_NYC_2019$price)
 hist(AB_NYC_2019$price)
 hist(log(AB_NYC_2019$price))
@@ -130,7 +132,7 @@ hash.df$price<-AB_subset$price
 
 # most frequent and least frequent words
 
-```{r}
+```{r cache=TRUE}
 library(tm)
 sourceData <- VectorSource(AB_subset$name)
 corpus <- Corpus(sourceData)
@@ -165,7 +167,7 @@ tdm2$price <- AB_subset$price
 #tdm2Test <- tdm2[-split,]
 ```
 
-```{r}
+```{r cache=TRUE}
 colS <- colSums(as.matrix(tdm))
 doc_features <- data.table::data.table(name = attributes(colS)$names, count = colS)
 
@@ -181,7 +183,7 @@ wordcloud(names(colS), colS, min.freq = 300, scale = c(6,.1), colors = brewer.pa
 ### Modeling
 
 ### Feature hashed data
-```{r}
+```{r cache=TRUE}
 #Time the creationg of the Linear Model
 st <- Sys.time()
 mod.lm <- lm(price~.,data=hash.df)
@@ -198,11 +200,11 @@ summary(mod.lm) ### not able to tell the coefficents o corresponds to which word
 ### Feature non-hashed data (Frequency based)
 
 Should we include the other predictors for controlling? The top 10 words do not seem to be important (expect luxury)?
-```{r}
+```{r cache=TRUE}
 library(lm.beta)
 #Time the creationg of the Linear Model
 st <- Sys.time()
-mod.lm_freq <- lm(price~.,data=tdm2)
+mod.lm_freq <- lm(log(price+0.01)~.,data=tdm2)
 end <- Sys.time();
 
 freq.lm.time<- end - st
@@ -231,7 +233,7 @@ tdm2_other$availablity_365_ori<-AB_subset$availability_365
 
 ### I only include the words which appear at leasr 8 times. 
 
-mod.lm_freq_other<- lm(price~.,data=tdm2_other)
+mod.lm_freq_other<- lm(log(price+0.01)~.,data=tdm2_other)
 coef_other<- summary(mod.lm_freq_other)
 coef_other<- as.data.frame(coef_other$coefficients)
 
@@ -243,6 +245,23 @@ st_coef_other<- lm.beta(mod.lm_freq_other)
 st_coef_other$standardized.coefficients[order(st_coef_other$standardized.coefficients, decreasing = T)[1:20]] 
 
 ### check the original names which include the important words
-AB_NYC_2019$name[grep("event", AB_NYC_2019$name, ignore.case=TRUE)]
+AB_NYC_2019$name[grep("sonder", AB_NYC_2019$name, ignore.case=TRUE)]
 ```
 
+### popularity
+```{r}
+mod.lm_freq_other<- lm(log(reviews_per_month_ori+0.01)~.,data=tdm2_other)
+coef_other<- summary(mod.lm_freq_other)
+coef_other<- as.data.frame(coef_other$coefficients)
+
+
+coef_other_sort<- coef_other[order(coef_other$Estimate, decreasing = T),]
+coef_other_sort[1:15,]
+
+st_coef_other<- lm.beta(mod.lm_freq_other)
+st_coef_other$standardized.coefficients[order(st_coef_other$standardized.coefficients, decreasing = T)[1:20]] 
+
+### check the original names which include the important words
+AB_NYC_2019$name[grep("garden-midtown1stop-breakfast", AB_NYC_2019$name, ignore.case=TRUE)]
+
+```
