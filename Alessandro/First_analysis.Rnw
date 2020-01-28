@@ -56,6 +56,7 @@
 suppressMessages(library(tidyverse))
 suppressMessages(library(ggmap))
 suppressMessages(library(R2jags))
+library(ggpubr)
 require(rstan)
 library(rgdal)
 library(corrplot)
@@ -95,16 +96,84 @@ ggplot(data) +
 lm(log(price) ~ calculated_host_listings_count+ minimum_nights +as.factor(neighbourhood_group),data = data)
 @
 
-Register the google API key
 <<>>=
 # Upload the API key and register in Google
 register_google(key="AIzaSyAKqU3ozPUwkCE30RqlLbMHr0NA9ynfuDo")
 # Import New York map
-ny_map = get_map(location = c(lon = -74.00, lat = 40.72), zoom = 11, source = "google")
-# Plot it
+ny_map = get_map(location = c(lon = -73.96, lat = 40.72), zoom = 11, source = "google")
+# Plot it with the prices
 ggmap(ny_map) +
   geom_point(aes(x=longitude,y=latitude,color=log(price)),
              data=data, size=0.8, alpha =0.2)
+@
+
+<<>>=
+ggmap(ny_map) + 
+  geom_polygon(aes(x=longitude, y=latitude, fill=log(price), group=neighbourhood), 
+               data=data)
+@
+
+Compute the most frequent type of apartment for each neighboorhood
+<<>>=
+table(data$room_type) # actual distribution of the room types
+# Get the top room type acroos neighborhood
+top_room_neigh = data %>%
+  group_by(neighbourhood) %>%
+  count(room_type) %>% 
+  filter(n==max(n)) %>%
+  ungroup() %>%
+  rename(frequent_room_type = room_type)
+# Merge it back into data
+data = left_join(data, top_room_neigh, by=c("neighbourhood"))
+@
+<<>>=
+freq_room_neigh = data %>%
+  group_by(neighbourhood) %>%
+  count(room_type) %>% 
+  mutate(ratio_apt = n / sum(n)) %>%
+  filter(room_type=="Entire home/apt") 
+data = left_join(data, freq_room_neigh, by=c("neighbourhood"))
+@
+
+Plot now the data over the maps with color changing based on the most frequent type of room
+<<>>=
+ggmap(ny_map) + 
+  geom_point(aes(x=longitude, y=latitude, color=frequent_room_type), alpha=0.6, size=0.4, data=data) +
+  theme(legend.position = "bottom")
+@
+<<>>=
+map_apt = ggmap(ny_map) + 
+  geom_point(aes(x=longitude, y=latitude, color=ratio_apt), alpha=0.6, size=0.4, data=data) +
+  theme(legend.position = "bottom", 
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank()) +
+  scale_color_continuous(name = "Perc. of Entire home/apt")+
+  facet_grid(~"Perc. of Entire home/apt across neighbourhoods")
+@
+Compute the average price across neighborhoods.
+<<>>=
+data = data[data$price>0,]
+prices = data %>%
+  #mutate(log_price = log(price))
+  group_by(neighbourhood) %>%
+  summarise(mean_log_price = mean(log(price))) 
+# Merge it back into data
+data = left_join(data, prices, by=c("neighbourhood"))
+@
+
+<<>>=
+map_price = ggmap(ny_map) + 
+  geom_point(aes(x=longitude, y=latitude, color=mean_log_price), alpha=0.6, size=0.4, data=data) +
+  theme(legend.position = "bottom", 
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank()) +
+  scale_color_continuous(name = "Average (log) price",
+                         low="navy", high="sienna1")+
+  facet_grid(~"Average (log) price across neighbourhoods")
+@
+
+<<>>=
+ggpubr::ggarrange(map_apt, map_price, ncol=2)
 @
 
 
