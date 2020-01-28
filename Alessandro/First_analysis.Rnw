@@ -54,6 +54,11 @@
 \section*{R setup}
 <<>>=
 suppressMessages(library(tidyverse))
+suppressMessages(library(ggmap))
+suppressMessages(library(R2jags))
+library(ggpubr)
+require(rstan)
+library(rgdal)
 library(corrplot)
 library(RColorBrewer)
 require(foreign)
@@ -64,7 +69,184 @@ require(reshape2)
 ggplot2::theme_set(ggplot2::theme_bw())
 @
 
+<<>>=
+library(tigris)
+library(dplyr)
+library(sp)
+library(maptools)
+library(broom)
+library(httr)
+@
+
 \section{Introduction}
+
+<<>>=
+data = read.csv("AB_NYC_2019.csv")
+@
+
+<<>>=
+ggplot(data) +
+  geom_point(aes(x=latitude, y=longitude, color = as.factor(
+    neighbourhood_group)))+
+  theme(legend.position = "bottom")
+
+@
+
+<<>>=
+lm(log(price) ~ calculated_host_listings_count+ minimum_nights +as.factor(neighbourhood_group),data = data)
+@
+
+<<>>=
+# Upload the API key and register in Google
+register_google(key="AIzaSyAKqU3ozPUwkCE30RqlLbMHr0NA9ynfuDo")
+# Import New York map
+ny_map = get_map(location = c(lon = -73.96, lat = 40.72), zoom = 11, source = "google")
+# Plot it with the prices
+ggmap(ny_map) +
+  geom_point(aes(x=longitude,y=latitude,color=log(price)),
+             data=data, size=0.8, alpha =0.2)
+@
+
+<<>>=
+ggmap(ny_map) + 
+  geom_polygon(aes(x=longitude, y=latitude, fill=log(price), group=neighbourhood), 
+               data=data)
+@
+
+Compute the most frequent type of apartment for each neighboorhood
+<<>>=
+table(data$room_type) # actual distribution of the room types
+# Get the top room type acroos neighborhood
+top_room_neigh = data %>%
+  group_by(neighbourhood) %>%
+  count(room_type) %>% 
+  filter(n==max(n)) %>%
+  ungroup() %>%
+  rename(frequent_room_type = room_type)
+# Merge it back into data
+data = left_join(data, top_room_neigh, by=c("neighbourhood"))
+@
+<<>>=
+freq_room_neigh = data %>%
+  group_by(neighbourhood) %>%
+  count(room_type) %>% 
+  mutate(ratio_apt = n / sum(n)) %>%
+  filter(room_type=="Entire home/apt") 
+data = left_join(data, freq_room_neigh, by=c("neighbourhood"))
+@
+
+Plot now the data over the maps with color changing based on the most frequent type of room
+<<>>=
+ggmap(ny_map) + 
+  geom_point(aes(x=longitude, y=latitude, color=frequent_room_type), alpha=0.6, size=0.4, data=data) +
+  theme(legend.position = "bottom")
+@
+<<>>=
+map_apt = ggmap(ny_map) + 
+  geom_point(aes(x=longitude, y=latitude, color=ratio_apt), alpha=0.6, size=0.4, data=data) +
+  theme(legend.position = "bottom", 
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank()) +
+  scale_color_continuous(name = "Perc. of Entire home/apt")+
+  facet_grid(~"Perc. of Entire home/apt across neighbourhoods")
+@
+Compute the average price across neighborhoods.
+<<>>=
+data = data[data$price>0,]
+prices = data %>%
+  #mutate(log_price = log(price))
+  group_by(neighbourhood) %>%
+  summarise(mean_log_price = mean(log(price))) 
+# Merge it back into data
+data = left_join(data, prices, by=c("neighbourhood"))
+@
+
+<<>>=
+map_price = ggmap(ny_map) + 
+  geom_point(aes(x=longitude, y=latitude, color=mean_log_price), alpha=0.6, size=0.4, data=data) +
+  theme(legend.position = "bottom", 
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank()) +
+  scale_color_continuous(name = "Average (log) price",
+                         low="navy", high="sienna1")+
+  facet_grid(~"Average (log) price across neighbourhoods")
+@
+
+<<>>=
+ggpubr::ggarrange(map_apt, map_price, ncol=2)
+@
+
+
+<<>>=
+library(leaflet)
+nyc_neighborhoods_df <- tidy(nyc_neighborhoods)
+m <- leaflet() %>%
+  addTiles() %>%  # Add default OpenStreetMap map tiles
+  setView(-74.00, 40.71, zoom = 12) %>%
+  addProviderTiles("CartoDB.Positron")
+@
+
+Get the neighborhoods
+<<>>=
+nyc_neighborhoods = rgdal::readOGR("nyc_pediacities_neighborhoods_v3_polygon.geojson")
+nyc_neighborhoods_df <- tidy(nyc_neighborhoods)
+ggplot() + 
+  geom_polygon(data=nyc_neighborhoods_df, aes(x=long, y=lat, group=group))
+@
+<<>>=
+ggmap(ny_map) + 
+  geom_polygon(data=nyc_neighborhoods_df, aes(x=long, y=lat, group=group), color="blue", fill=NA)
+@
+
+
+Build the adjacency matrix. It measures the distance between neighboorhoods. 
+As a first step, we can compute the mean latitude and longitude for each neighborhood. Then, compute the distance between the mean points of each neighborhood. Finally, imagine cutoff to set 0 and 1. 
+<<>>=
+compute_distance = function(coord){
+  return(sqrt(coord[1]^2+coord[2]^2))
+}
+neighbr_names = sort(unique(data$neighbourhood))
+# Step 1 - compute mean latitude and longitude
+df_ng = data %>%
+  group_by(neighbourhood) %>%
+  dplyr::summarize_at(c("longitude", "latitude"), mean, na.rm=TRUE)
+# Step 2 - initialize the adjacency matrix
+adjMat = matrix(0, nrow=length(neighbr_names),ncol=length(neighbr_names))
+colnames(adjMat) = rownames(adjMat) = neighbr_names
+# Step 3 - Insert the respective measures of distance
+for(n in neighbr_names){
+  mat_coord = matrix(0, nrow=nrow(df_ng), ncol=2)
+  # Sum the coordiantes acroos neighboorhoods
+  neigh = df_ng[df_ng$neighbourhood==n, ][,-1]
+  mat_coord[,1] = as.matrix(df_ng[, -1])[,1] - as.numeric(neigh[1])
+  mat_coord[,2] = as.matrix(df_ng[, -1])[,2] - as.numeric(neigh[2])
+  # Compute the euclidean distance
+  vec_coord = apply(mat_coord, 1, compute_distance)
+  adjMat[which(neighbr_names==n),] = vec_coord
+}
+@
+
+What should we do with this adjMat? Should we make it a 0,1 according to cutoff? Or should we make it a fucntion of an exponential?
+<<>>=
+adjMat_binary = ifelse(adjMat <0.05,1,0)
+@
+
+Try a mini Model with STAN
+<<>>=
+df = data[data$price > 0, ]
+X = model.matrix(log(price) ~ neighbourhood-1, data=df)
+N = dim(X)[1]
+p = dim(X)[2]
+D = adjMat_binary
+y = log(df$price)
+beta0 = rep(0, p)
+stan_dat = list(N = N, p=p, y =y,X=X,D=D, beta0=beta0)
+fit_neigh = stan('multivariate_regression.stan', data = stan_dat, chains = 2, refresh = 0, ver)
+output = rstan::extract(fit_neigh)
+@
+
+
+
 
 
 
