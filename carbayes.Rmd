@@ -1,0 +1,93 @@
+---
+title: "carbayes"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(ggmap)
+library(tigris)
+library(dplyr)
+library(leaflet)
+library(sp)
+library(maptools)
+library(httr)
+library(rgdal)
+library(broom)
+library(geosphere)
+library(CARBayes)
+library(spdep)
+library(rgeos)
+library(raster)
+data=read.csv(url('https://raw.githubusercontent.com/STA-723/Case-Study-2-team-7/master/AB_NYC_2019.csv'))
+summary(data)
+dim(data) ## 48895*16
+## NA's: only in reviews_per_month, 10052/48895=20%
+data$id=factor(data$id)
+data$host_id=factor(data$host_id)
+df=data
+nyc_shp <- shapefile("~/Case-Study-2-team-7/Carol/zillow-neighborhoods.shp")
+nyc_shp@data$id <- as.character(nyc_shp@data$name)
+nyc.points <- fortify(gBuffer(nyc_shp, byid = TRUE, width = 0), region = "name")
+nyc.df <- inner_join(nyc.points, nyc_shp@data, by = "id")
+nyc.cent <- nyc.df %>%
+  group_by(id) %>%
+  summarize(long = median(long), lat = median(lat))
+list.nyc<-poly2nb(nyc_shp)
+W<-nb2listw(list.nyc, style="W", zero.policy=TRUE)
+B=nb2mat(list.nyc, style="B", zero.policy=TRUE)
+saveRDS(B,'adjacency.RData')
+
+print(W,zero.policy=T)
+plot(W, coordinates(nyc_shp))
+df_shp=nyc_shp@data
+df$neighbourhood=gsub("'", "", df$neighbourhood)
+df$neighbourhood=gsub("Bedford-Stuyvesant", "Bedford Stuyvesant", df$neighbourhood)
+df$neighbourhood=gsub("Highbridge", "High Bridge", df$neighbourhood)
+df$neighbourhood=gsub("Columbia St", "Columbia Street Waterfront District", df$neighbourhood)
+df$neighbourhood=gsub("Battery Park City", "Battery Park", df$neighbourhood)
+df$neighbourhood=gsub("Mariners Harbor", "Mariner's Harbor", df$neighbourhood)
+df$neighbourhood=gsub("Concord", "Grasmere - Concord", df$neighbourhood)
+df$neighbourhood=gsub("Columbia St", "Columbia Street Waterfront District", df$neighbourhood)
+df$neighbourhood=gsub("Battery Park City", "Battery Park", df$neighbourhood)
+df$neighbourhood=gsub("Downtown Brooklyn", "Downtown", df$neighbourhood)
+df$neighbourhood=gsub("Hunts Point", "Hunters Point", df$neighbourhood)
+df$neighbourhood=gsub("Throgs Neck", "Throggs Neck", df$neighbourhood)
+df$neighbourhood=gsub("Richmondtown", "Richmond Town", df$neighbourhood)
+df$neighbourhood=gsub("Princes Bay", "Prince's Bay", df$neighbourhood)
+df$neighbourhood=gsub("Douglaston", "Douglaston-Little Neck", df$neighbourhood)
+df$neighbourhood=gsub("Bay Terrace, Staten Island", "Bay Terrace", df$neighbourhood)
+df$neighbourhood=gsub("Little Neck", "Douglaston-Little Neck", df$neighbourhood)
+df$neighbourhood=gsub("Prospect-Lefferts Gardens", "Prospect Lefferts Gardens", df$neighbourhood)
+df$neighbourhood=gsub("Columbia Street Waterfront Districtreet Waterfront District", "Columbia Street Waterfront District", df$neighbourhood)
+df$neighbourhood=gsub("Douglaston-Douglaston-Little Neck", "Douglaston-Little Neck", df$neighbourhood)
+df$neighbourhood=gsub("Concourse Village", "Concourse", df$neighbourhood)
+
+notin=(df$neighbourhood)[!df$neighbourhood %in% df_shp$name]
+length(unique(notin))
+# l=list()
+# for (j in 1:length(unique(notin))){
+#   nam=unique(notin)[j]
+#   print(nam)
+#   print((df_shp$id)[grep(substr(nam,1,3),df_shp$id)])
+#   l[[j]]=(df_shp$id)[grep(substr(nam,1,3),df_shp$id)]
+# }
+df=df[! df$neighbourhood %in% notin,]
+df=na.omit(df)
+nonei=names(which(apply(b,1,sum)==0))#no neighbour
+df=df[! df$neighbourhood %in% nonei,]
+indarea=sapply(as.vector(df$neighbourhood),function(x) (which(df_shp$name==x))[1])
+b=B[sort(unique(indarea)),sort(unique(indarea))]
+ind=as.factor(indarea)
+ind=as.numeric(ind)
+levels(ind)=1:length(unique(indarea))
+library(tictoc)
+tic('car')
+car=S.CARmultilevel(log(1+price)~room_type+minimum_nights+calculated_host_listings_count+availability_365+number_of_reviews+reviews_per_month-1,'gaussian',data=df,ind.area = as.vector(ind),W=b,burnin = 10000,n.sample = 100000,thin = 10)
+toc()
+saveRDS(car,'car.RData')
+eff <- summarise.lincomb(model=car, columns=c(2,3,4),quantiles=c(0.5, 0.025, 0.975), distribution=FALSE)
+plot(log(1+df$price), eff$quantiles[ ,1], pch=19,   ylim=c(-0.55,0.05), xlab="Number of crimes", ylab="Effect of crime")
+```
+
+
