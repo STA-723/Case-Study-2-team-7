@@ -1,0 +1,198 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+This file runs the model to deal with spacial autocorrelation. 
+```{r}
+library(tidyverse)
+library(ggpubr)
+require(rstan)
+library(rray)
+```
+
+Import the data and set some variables
+```{r}
+# Import the data
+data = read.csv("AB_NYC_2019.csv")
+# Include the variable that detects if the renting host is a couple or a single 
+# person/company
+data =data %>%
+  mutate(couple_renting = (stringr::str_detect(host_name, '&| And | Y |\\+| and ')*1 )) 
+# If number of reviews is missing, set it to 0
+data[is.na(data$reviews_per_month),]$reviews_per_month = 0
+# Drop rows where price==0
+data = data[data$price>0,]
+# Take the log of prices
+```
+
+Our model is the following 
+$$
+\begin{align}
+y_i = \alpha + r_i + &B_{k_i} + \mathbf{x}_i^T\boldsymbol{\beta} + \eta_{l_i} + \varepsilon_i \\
+&\varepsilon_i \stackrel{iid}{\sim} \mathcal{N}(0,1/\phi) \\
+&p(\alpha, \phi) \propto 1/\phi\\
+&\boldsymbol{\beta} \sim \mathcal{N}(\mathbf{0},g(\mathbf{X}^T\mathbf{X})^{-1}/\phi)\\
+&g\sim InvGamma(1/2,1/2) \\
+&r_i \stackrel{iid}{\sim} \mathcal{N}(0, 1/\phi)\\
+&B_{k_i} \stackrel{iid}{\sim} \mathcal{N}(0, g_B/\phi)\\
+&g_B \sim InvGamma(1/2,1/2) \\
+&\eta_{l_i} = \mathcal{N}(0, \mathbf{K}^{-1}/\phi)\\
+& \mathbf{K} \sim Wish_G(3, \mathbf{D})\\
+&\mathbf{D} = E_W - \rho W\\
+&\rho \sim U(0,1)
+\end{align}
+$$
+where $W$ is the adjacency matrix. The code below computes it.
+```{r}
+compute_distance = function(coord){
+  return(sqrt(coord[1]^2+coord[2]^2))
+}
+neighbr_names = sort(unique(data$neighbourhood))
+# Step 1 - compute mean latitude and longitude
+df_ng = data %>%
+  group_by(neighbourhood) %>%
+  dplyr::summarize_at(c("longitude", "latitude"), mean, na.rm=TRUE)
+# Step 2 - initialize the adjacency matrix
+adjMat = matrix(0, nrow=length(neighbr_names),ncol=length(neighbr_names))
+colnames(adjMat) = rownames(adjMat) = neighbr_names
+# Step 3 - Insert the respective measures of distance
+for(n in neighbr_names){
+  mat_coord = matrix(0, nrow=nrow(df_ng), ncol=2)
+  # Sum the coordiantes acroos neighboorhoods
+  neigh = df_ng[df_ng$neighbourhood==n, ][,-1]
+  mat_coord[,1] = as.matrix(df_ng[, -1])[,1] - as.numeric(neigh[1])
+  mat_coord[,2] = as.matrix(df_ng[, -1])[,2] - as.numeric(neigh[2])
+  # Compute the euclidean distance
+  vec_coord = apply(mat_coord, 1, compute_distance)
+  adjMat[which(neighbr_names==n),] = vec_coord
+}
+# Finally, compute W by setting a treshold
+W = ifelse(adjMat <0.032,1,0)
+# Important - this may lead to not solvable matrixes. Need to fix it
+# Tribeca - Soho - Noho - Lower East Side
+W[179, ]
+
+```
+Add now the matrix $E_W = diag\{w_{1+}, \ldots, w_{n+}\}$
+```{r}
+E_W = diag(apply(W, 2, sum))
+# test
+solve(E_W[-1,-1] - W[-1,-1])
+solve(W)
+
+round(eigen(W)$values, 4)
+
+
+W[113,]
+
+
+which(duplicated(W) | duplicated(W[nrow(W):1, ])[nrow(W):1])
+W[,c(which(duplicated(W) | duplicated(W[nrow(W):1, ])[nrow(W):1]))]
+```
+
+
+```{r}
+neighbr_names = sort(unique(data$neighbourhood))
+# Step 1 - compute mean latitude and longitude
+df_ng_max = data %>%
+  group_by(neighbourhood) %>%
+  dplyr::summarize_at(c("longitude", "latitude"), max, na.rm=TRUE)
+df_ng_min = data %>%
+  group_by(neighbourhood) %>%
+  dplyr::summarize_at(c("longitude", "latitude"), min, na.rm=TRUE)
+df_ng = left_join(df_ng_max, df_ng_min, by=c("neighbourhood"))
+# Step 2 - initialize the adjacency matrix
+adjMat = diag(length(neighbr_names))
+colnames(adjMat) = rownames(adjMat) = neighbr_names
+# Step 3 - Insert the respective measures of distance
+for(n in neighbr_names){
+  # Subtract max/min latitude and longitude from each point
+  neig_index = which(df_ng$neighbourhood==n)
+  neigh_allpoints = data[data$neighbourhood==n, ]
+  neigh = df_ng[df_ng$neighbourhood==n,]
+  neigh[,c(1,2,3,4,5)] = neigh[,c(1,4,5,2,3)] 
+  reduced_distances = (abs(as.matrix(df_ng[-1])%b-% matrix(unlist(c(neigh)[-1]), 1))<0.005)*1
+  # Check if the adjacency exists
+  for(d in 1:4){
+    candidates = which(reduced_distances[,d]==1)
+    for(candidate in candidates){
+      candidate_ng = data[data$neighbourhood==neighbr_names[candidate], ]
+      if(d==1){
+        # Min Long neigh similar to Max Long candidate ng candidate
+        coord_ng = as.vector(neigh_allpoints[neigh_allpoints$longitude == min(neigh_allpoints$longitude),c(7,8)][1,])
+        coord_ng_candidate = as.vector(candidate_ng[candidate_ng$longitude == max(candidate_ng$longitude),c(7,8)][1,])
+      } else if(d==2){
+          # Min Lat neigh similar to Max Lat candidate ng candidate
+        coord_ng = as.vector(neigh_allpoints[neigh_allpoints$latitude == min(neigh_allpoints$latitude),c(7,8)][1,])
+        coord_ng_candidate = as.vector(candidate_ng[candidate_ng$latitude == max(candidate_ng$latitude),c(7,8)][1,])
+      } else if(d==3){
+        # Max Long neigh similar to Min Long candidate ng candidate
+        coord_ng = as.vector(neigh_allpoints[neigh_allpoints$longitude == max(neigh_allpoints$longitude),c(7,8)][1,])
+        coord_ng_candidate = as.vector(candidate_ng[candidate_ng$longitude == min(candidate_ng$longitude),c(7,8)][1,])
+      } else {
+        # Max Lat neigh similar to Min Lat candidate ng candidate
+        coord_ng = as.vector(neigh_allpoints[neigh_allpoints$latitude == max(neigh_allpoints$latitude),c(7,8)][1,])
+        coord_ng_candidate = as.vector(candidate_ng[candidate_ng$latitude == min(candidate_ng$latitude),c(7,8)][1,])
+      }
+        # Compute euclidean distance between the selected points
+        dist = as.integer((sqrt((coord_ng[1]-coord_ng_candidate[1])^2 + (coord_ng[2]-coord_ng_candidate[2])^2)<0.02)*1)
+        # Include the value in the matrix
+        adjMat[neig_index, candidate] = dist
+    }
+  }  
+}
+W=adjMat 
+```
+And check that W is all right
+```{r}
+# Check if symmetric
+for(n in 1:length(neighbr_names)){
+  row = W[n,]
+  col = W[,n]
+  if(sum(row==col)!=221){
+    diff = which(row!=col)
+    for(d in diff){
+      W[n,d] = W[d,n] = 0
+    }
+  }
+}
+# Check if repeated columns
+which(duplicated(W) | duplicated(W[nrow(W):1, ])[nrow(W):1])
+dup = W[,c(which(duplicated(W) | duplicated(W[nrow(W):1, ])[nrow(W):1]))]
+# Fix repeated columns (by hand...)
+W[2,102] = W[102,2] = 0 # Huguenot and Arden Heights do not strictly match
+W[68,4] = W[4,68] = 1 # Edgemere and Arverne are connected
+W[90,121 ] = W[121 ,90] = 0 # manhattan beach is not close to Gravesand
+W[213,138 ] = W[138,213] = 1 # whitestone is connected to murray hill
+W[213,9 ] = W[9,213] = 1 #whitestone is connected to bay terrace
+W[212,123 ] = W[123,212] = 1 #Marines harbor is connected to westerleigh
+# Find Other linear combos
+findLinearCombos(W)
+findLinearCombos(t(W))
+W = W[-c(164,166,175),][,-c(164, 166, 175)]
+# Try to see if it is invertible
+solve(W)
+# Compute E_W
+E_W = diag(apply(W, 2, sum))
+# test
+u = runif(1)
+s = solve(E_W - u*W)
+solve(W)
+
+round(eigen(W)$values, 4)
+
+
+W[113,]
+
+W = t(W)
+
+```
+
+
+
+
+
+
+
+
+
