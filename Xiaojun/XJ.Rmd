@@ -41,10 +41,20 @@ AB_NYC_2019$neighbourhood_group<- as.factor(AB_NYC_2019$neighbourhood_group)
 AB_NYC_2019$neighbourhood<- as.factor(AB_NYC_2019$neighbourhood)
 AB_NYC_2019$room_type<- as.factor(AB_NYC_2019$room_type)
 
-now<- as.Date("2020-01-01")
-AB_NYC_2019$last_review<- as.numeric(gsub("([0-9]+).*$", "\\1", now-AB_NYC_2019$last_review))
+date_threshold<- as.Date("2019-07-09")
+AB_NYC_2019$last_review<- as.numeric(gsub("([0-9]+).*$", "\\1", date_threshold-AB_NYC_2019$last_review))
+AB_NYC_2019_complete<- AB_NYC_2019[complete.cases(AB_NYC_2019), ]
 
-min(AB_NYC_2019$last_review, na.rm = T)
+AB_NYC_2019<- AB_NYC_2019_complete[AB_NYC_2019_complete$last_review < 365, ]
+AB_NYC_2019_0out<- AB_NYC_2019[AB_NYC_2019$availability_365 !=0, ]
+AB_NYC_2019_0out$availability_365 <- ifelse(AB_NYC_2019_0out$availability_365 <= 60,"Low", AB_NYC_2019_0out$availability_365)
+
+AB_NYC_2019_0out$availability_365 <- ifelse(AB_NYC_2019_0out$availability_365 >60 & AB_NYC_2019_0out$availability_365 <=180,"Median", AB_NYC_2019_0out$availability_365)
+
+AB_NYC_2019_0out$availability_365 <- ifelse(AB_NYC_2019_0out$availability_365 >180,"High", AB_NYC_2019_0out$availability_365)
+
+
+
 ```
 
 ### Correlation
@@ -84,7 +94,7 @@ ggplot(AB_NYC_2019,aes(x=room_type,y=log(price),color=neighbourhood_group))+geom
 
 ggplot(AB_NYC_2019,aes(x=neighbourhood_group,y=log(price),color=room_type))+geom_boxplot()+theme_bw()
 
-ggplot(AB_NYC_2019,aes(x=neighbourhood_group,y=log(number_of_reviews),color=room_type))+geom_boxplot()+theme_bw() ### heterogeneity
+ggplot(AB_NYC_2019,aes(x=neighbourhood_group,y=log(reviews_per_month),color=room_type))+geom_boxplot()+theme_bw() ### heterogeneity
 
 
 
@@ -184,6 +194,11 @@ ggplot(doc_features[count>500],aes(name, count)) +geom_bar(stat = "identity",fil
 wordcloud(names(colS), colS, min.freq = 300, scale = c(6,.1), colors = brewer.pal(6, 'Dark2'))
 
 wordcloud2(names(colS), colS, min.freq = 300, scale = c(6,.1), colors = brewer.pal(6, 'Dark2'))
+
+colS<- as.data.frame(colS)
+demofreq<- data.frame(word = rownames(colS), freq = colS$colS)
+demofreq<- demofreq[demofreq$freq>=300, ]
+wordcloud2(data = demofreq)
 ```
 
 ### Modeling
@@ -262,8 +277,8 @@ coef_other<- summary(mod.lm_freq_other)
 coef_other<- as.data.frame(coef_other$coefficients)
 
 
-coef_other_sort<- coef_other[order(coef_other$Estimate, decreasing = T),]
-coef_other_sort[1:15,]
+coef_other_sort<- coef_other[order(coef_other$`t value`, decreasing = T),]
+coef_other_sort[1:20,]
 
 st_coef_other<- lm.beta(mod.lm_freq_other)
 st_coef_other$standardized.coefficients[order(st_coef_other$standardized.coefficients, decreasing = T)[1:20]] 
