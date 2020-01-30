@@ -47,14 +47,19 @@ AB_NYC_2019_complete<- AB_NYC_2019[complete.cases(AB_NYC_2019), ]
 
 AB_NYC_2019<- AB_NYC_2019_complete[AB_NYC_2019_complete$last_review < 365, ]
 AB_NYC_2019_0out<- AB_NYC_2019[AB_NYC_2019$availability_365 !=0, ]
-AB_NYC_2019_0out$availability_365 <- ifelse(AB_NYC_2019_0out$availability_365 <= 60,"Low", AB_NYC_2019_0out$availability_365)
 
-AB_NYC_2019_0out$availability_365 <- ifelse(AB_NYC_2019_0out$availability_365 >60 & AB_NYC_2019_0out$availability_365 <=180,"Median", AB_NYC_2019_0out$availability_365)
+AB_NYC_2019_0out$availability_365 <- ifelse(AB_NYC_2019_0out$availability_365 <= 60,0, AB_NYC_2019_0out$availability_365)
 
-AB_NYC_2019_0out$availability_365 <- ifelse(AB_NYC_2019_0out$availability_365 >180,"High", AB_NYC_2019_0out$availability_365)
+AB_NYC_2019_0out$availability_365 <- ifelse(AB_NYC_2019_0out$availability_365 >60 & AB_NYC_2019_0out$availability_365 <=180,1, AB_NYC_2019_0out$availability_365)
 
+AB_NYC_2019_0out$availability_365 <- ifelse(AB_NYC_2019_0out$availability_365 >180,2, AB_NYC_2019_0out$availability_365)
 
+AB_NYC_2019_0out$availability_365<- as.factor(as.character(AB_NYC_2019_0out$availability_365))
 
+### 0,1,2 as low, median, high for availability
+
+AB_NYC_2019_final<- AB_NYC_2019_0out[AB_NYC_2019_0out$price <= 2000 & AB_NYC_2019_0out$price >= 10, ]
+save(AB_NYC_2019_final, file="AB_NYC_2019_final.rdata")
 ```
 
 ### Correlation
@@ -74,6 +79,10 @@ corrplot(corr,number.cex=.8, upper="ellipse")
   - Again, right skewed, could use log scale
 
 ```{r cache=TRUE}
+load("C:/Users/XJ/OneDrive - Duke University/STA-723/Case-Study-2-team-7/AB_NYC_2019_final.rdata")
+AB_NYC_2019<- AB_NYC_2019_final
+AB_subset<- AB_NYC_2019
+
 max(AB_NYC_2019$price)
 hist(AB_NYC_2019$price)
 hist(log(AB_NYC_2019$price))
@@ -223,20 +232,20 @@ summary(mod.lm) ### not able to tell the coefficents o corresponds to which word
 Should we include the other predictors for controlling? The top 10 words do not seem to be important (expect luxury)?
 ```{r cache=TRUE}
 library(lm.beta)
-#Time the creationg of the Linear Model
-st <- Sys.time()
-mod.lm_freq <- lm(log(price+0.01)~.,data=tdm2)
-end <- Sys.time();
-
-freq.lm.time<- end - st
-
-# Predict on testing data
-#pred<- predict(mod.lm_freq,newdata=tdm2Test)
-#tdm2Test$pred.lm <- pred
-summary(mod.lm_freq)
-
-st_coef<- lm.beta(mod.lm_freq)
-st_coef$standardized.coefficients[order(st_coef$standardized.coefficients, decreasing = T)[1:10]] 
+# #Time the creationg of the Linear Model
+# st <- Sys.time()
+# mod.lm_freq <- lm(log(price+0.01)~.,data=tdm2)
+# end <- Sys.time();
+# 
+# freq.lm.time<- end - st
+# 
+# # Predict on testing data
+# #pred<- predict(mod.lm_freq,newdata=tdm2Test)
+# #tdm2Test$pred.lm <- pred
+# summary(mod.lm_freq)
+# 
+# st_coef<- lm.beta(mod.lm_freq)
+# st_coef$standardized.coefficients[order(st_coef$standardized.coefficients, decreasing = T)[1:10]] 
 
 #stepAIC(mod.lm_freq, direction="both") ### quite slow
 
@@ -245,7 +254,7 @@ tdm2_other<- tdm2
 tdm2_other$neighbourhood_group_ori<-AB_subset$neighbourhood_group
 tdm2_other$room_type_ori<-AB_subset$room_type
 tdm2_other$minimum_night_ori<-AB_subset$minimum_nights
-tdm2_other$numer_of_reviews_ori<-AB_subset$number_of_reviews
+#tdm2_other$numer_of_reviews_ori<-AB_subset$number_of_reviews
 tdm2_other$last_review_ori<-AB_subset$last_review
 tdm2_other$reviews_per_month_ori<-AB_subset$reviews_per_month
 tdm2_other$calculated_host_listings_count_ori<-AB_subset$calculated_host_listings_count
@@ -261,6 +270,8 @@ coef_other<- as.data.frame(coef_other$coefficients)
 
 coef_other_sort<- coef_other[order(coef_other$`t value`, decreasing = T),]
 coef_other_sort[1:25,]
+#### RUN THE LINE ABOVE FOR IMPORTANT WORDS FOR PRICE!!!!!!!
+
 
 ### not standardize
 #st_coef_other<- lm.beta(mod.lm_freq_other)
@@ -278,10 +289,11 @@ coef_other<- as.data.frame(coef_other$coefficients)
 
 
 coef_other_sort<- coef_other[order(coef_other$`t value`, decreasing = T),]
-coef_other_sort[1:20,]
+coef_other_sort[1:25,] 
+#### RUN THE LINE ABOVE FOR IMPORTANT WORDS FOR POPULARITY!!!!!!!
 
-st_coef_other<- lm.beta(mod.lm_freq_other)
-st_coef_other$standardized.coefficients[order(st_coef_other$standardized.coefficients, decreasing = T)[1:20]] 
+#st_coef_other<- lm.beta(mod.lm_freq_other)
+#st_coef_other$standardized.coefficients[order(st_coef_other$standardized.coefficients, decreasing = T)[1:20]] 
 
 ### check the original names which include the important words
 AB_NYC_2019$name[grep("garden-midtown1stop-breakfast", AB_NYC_2019$name, ignore.case=TRUE)]
