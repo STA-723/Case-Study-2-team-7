@@ -34,15 +34,17 @@ y_i = \alpha + r_i + &B_{k_i} + \mathbf{x}_i^T\boldsymbol{\beta} + \eta_{l_i} + 
 &\boldsymbol{\beta} \sim \mathcal{N}(\mathbf{0},g(\mathbf{X}^T\mathbf{X})^{-1}/\phi)\\
 &g\sim InvGamma(1/2,1/2) \\
 &r_i \stackrel{iid}{\sim} \mathcal{N}(0, 1/\phi)\\
-&B_{k_i} \stackrel{iid}{\sim} \mathcal{N}(0, g_B/\phi)\\
+&B_{k_i} {\sim} \mathcal{N}(\beta_{k_i}, g_B/\phi)\\
+&\beta_{k_i} \stackrel{iid}{\sim} \mathcal{N}(0, 1)\\
 &g_B \sim InvGamma(1/2,1/2) \\
-&\eta_{l_i} = \mathcal{N}(0, \mathbf{K}^{-1}/\phi)\\
-& \mathbf{K} \sim Wish_G(3, \mathbf{D})\\
+&\eta_{l_i} = \mathcal{N}(0, \mathbf{K}^{-1})\\
+& \mathbf{K} \sim Wish_G(3, \mathbf{D}^{-1})\\
 &\mathbf{D} = E_W - \rho W\\
 &\rho \sim U(0,1)
 \end{align}
 $$
-where $W$ is the adjacency matrix. The code below computes it.
+where $W$ is the adjacency matrix. We construct it in three ways.
+1) Use the euclidean distance across all the neighborhoods
 ```{r}
 compute_distance = function(coord){
   return(sqrt(coord[1]^2+coord[2]^2))
@@ -68,12 +70,7 @@ for(n in neighbr_names){
 }
 # Finally, compute W by setting a treshold
 W = ifelse(adjMat <0.032,1,0)
-# Important - this may lead to not solvable matrixes. Need to fix it
-# Tribeca - Soho - Noho - Lower East Side
-W[179, ]
-
 ```
-Add now the matrix $E_W = diag\{w_{1+}, \ldots, w_{n+}\}$
 ```{r}
 E_W = diag(apply(W, 2, sum))
 # test
@@ -90,7 +87,7 @@ which(duplicated(W) | duplicated(W[nrow(W):1, ])[nrow(W):1])
 W[,c(which(duplicated(W) | duplicated(W[nrow(W):1, ])[nrow(W):1]))]
 ```
 
-
+2) Use min-max argument and check with euclidean distance.
 ```{r}
 neighbr_names = sort(unique(data$neighbourhood))
 # Step 1 - compute mean latitude and longitude
@@ -166,27 +163,41 @@ W[90,121 ] = W[121 ,90] = 0 # manhattan beach is not close to Gravesand
 W[213,138 ] = W[138,213] = 1 # whitestone is connected to murray hill
 W[213,9 ] = W[9,213] = 1 #whitestone is connected to bay terrace
 W[212,123 ] = W[123,212] = 1 #Marines harbor is connected to westerleigh
-# Find Other linear combos
-findLinearCombos(W)
-findLinearCombos(t(W))
-W = W[-c(164,166,175),][,-c(164, 166, 175)]
-# Try to see if it is invertible
-solve(W)
 # Compute E_W
 E_W = diag(apply(W, 2, sum))
-# test
+# test Inveribility
 u = runif(1)
 s = solve(E_W - u*W)
-solve(W)
-
-round(eigen(W)$values, 4)
-
-
-W[113,]
-
-W = t(W)
-
 ```
+
+3) Use voronoy tasellation
+```{r}
+library(caramellar)
+# Sample (with replacement) 10 points for each neighbourhood
+adjMat_final  = matrix(0, nrow=221, ncol=221)
+nSamples =1000
+for(trial in 1:nSamples){
+  # Sample one point in each neighborhoods
+  coord_neighs = data %>% 
+    dplyr::select(neighbourhood, latitude, longitude) %>% 
+    group_by(neighbourhood) %>% sample_n(1) 
+  # compute the voronoi adjacency
+  W_voronoi = voronoi_adjacency(coord_neighs, formula = neighbourhood ~ latitude + longitude)
+  adjMat_voronoi = (W_voronoi$Adjacencies)*1
+  diag(adjMat_voronoi) = rep(1, 221)
+  colnames(adjMat_voronoi) = rownames(adjMat_voronoi) = neighbr_names
+  # Sum it with the previous ones
+  adjMat_final = adjMat_final + adjMat_voronoi
+}
+adjMat_voronoi = (adjMat_final/nSamples > 0.8)*1
+```
+check the differece between voronoi and my method
+```{r}
+check1 = (adjMat_voronoi > W)*1
+subset(check1, check1[2,] == 1)
+```
+Voronoi seems more efficient. It detects things that my method does not. Good to know, we are going to use voronoi for now.
+
 
 
 

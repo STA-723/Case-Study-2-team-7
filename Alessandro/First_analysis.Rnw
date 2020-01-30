@@ -196,7 +196,7 @@ m <- leaflet() %>%
 
 Get the neighborhoods
 <<>>=
-nyc_neighborhoods = rgdal::readOGR("nyc_pediacities_neighborhoods_v3_polygon.geojson")
+nyc_neighborhoods = rgdal::readOGR("neighbourhoods.geojson")
 nyc_neighborhoods_df <- tidy(nyc_neighborhoods)
 ggplot() + 
   geom_polygon(data=nyc_neighborhoods_df, aes(x=long, y=lat, group=group))
