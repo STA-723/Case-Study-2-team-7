@@ -20,6 +20,7 @@ library(ggthemes)
 library(wordcloud)
 library(BAS)
 library(MASS)
+library(wordcloud2)
 AB_NYC_2019 <- read_csv("C:/Users/XJ/OneDrive - Duke University/STA-723/Case-Study-2-team-7/AB_NYC_2019.csv")
 
 ```
@@ -181,6 +182,8 @@ doc_features[order(count)][1:10] #least 10 frequent words
 ggplot(doc_features[count>500],aes(name, count)) +geom_bar(stat = "identity",fill='lightblue',color='black')+theme(axis.text.x = element_text(angle = 45, hjust = 1))+theme_economist()+scale_color_economist()
 
 wordcloud(names(colS), colS, min.freq = 300, scale = c(6,.1), colors = brewer.pal(6, 'Dark2'))
+
+wordcloud2(names(colS), colS, min.freq = 300, scale = c(6,.1), colors = brewer.pal(6, 'Dark2'))
 ```
 
 ### Modeling
@@ -241,11 +244,12 @@ coef_other<- summary(mod.lm_freq_other)
 coef_other<- as.data.frame(coef_other$coefficients)
 
 
-coef_other_sort<- coef_other[order(coef_other$Estimate, decreasing = T),]
-coef_other_sort[1:15,]
+coef_other_sort<- coef_other[order(coef_other$`t value`, decreasing = T),]
+coef_other_sort[1:25,]
 
-st_coef_other<- lm.beta(mod.lm_freq_other)
-st_coef_other$standardized.coefficients[order(st_coef_other$standardized.coefficients, decreasing = T)[1:20]] 
+### not standardize
+#st_coef_other<- lm.beta(mod.lm_freq_other)
+#st_coef_other$standardized.coefficients[order(st_coef_other$standardized.coefficients, decreasing = T)[1:20]] 
 
 ### check the original names which include the important words
 AB_NYC_2019$name[grep("sonder", AB_NYC_2019$name, ignore.case=TRUE)]
