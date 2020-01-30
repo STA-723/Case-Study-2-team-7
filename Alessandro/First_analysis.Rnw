@@ -76,14 +76,22 @@ library(sp)
 library(maptools)
 library(broom)
 library(httr)
+library(stringr)
 @
 
 \section{Introduction}
 
 <<>>=
+# Import the data
 data = read.csv("AB_NYC_2019.csv")
+# Include the variable that detects if the renting host is a couple or a single 
+# person/company
+data =data %>%
+  mutate(couple_renting = (stringr::str_detect(host_name, '&| And | Y |\\+| and ')*1 )) 
+# If number of reviews is missing, set it to 0
+data[is.na(data$reviews_per_month),]$reviews_per_month = 0
 @
-
+Question: availability365 has 35\% of rows that are equal to 0. This does not make sense. Or better, it means that at the time of the recording of the data the house was inactive. Not available for rent.
 <<>>=
 ggplot(data) +
   geom_point(aes(x=latitude, y=longitude, color = as.factor(
@@ -228,7 +236,7 @@ for(n in neighbr_names){
 
 What should we do with this adjMat? Should we make it a 0,1 according to cutoff? Or should we make it a fucntion of an exponential?
 <<>>=
-adjMat_binary = ifelse(adjMat <0.05,1,0)
+adjMat_binary = ifelse(adjMat <0.01,1,0)
 @
 
 Try a mini Model with STAN
