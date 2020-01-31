@@ -8,6 +8,7 @@ library(tidyverse)
 library(ggpubr)
 require(rstan)
 library(rray)
+library(caramellar)
 ```
 
 Import the data and set some variables
@@ -170,10 +171,9 @@ u = runif(1)
 s = solve(E_W - u*W)
 ```
 
-3) Use voronoy tasellation
+3) Use voronoi tasellation
 ```{r}
-library(caramellar)
-# Sample (with replacement) 10 points for each neighbourhood
+# Sample (with replacement) 1000 points for each neighbourhood
 adjMat_final  = matrix(0, nrow=221, ncol=221)
 nSamples =1000
 for(trial in 1:nSamples){
@@ -197,6 +197,110 @@ check1 = (adjMat_voronoi > W)*1
 subset(check1, check1[2,] == 1)
 ```
 Voronoi seems more efficient. It detects things that my method does not. Good to know, we are going to use voronoi for now.
+```{r}
+# Compute the matrixes needed for the G wishart specification
+W = adjMat_voronoi
+E_W = diag(apply(W, 1, sum))
+# Check if it is invertible under paper formulation
+rho = runif(1)
+solve(E_W-rho*W)
+
+```
+
+## Import the cleared data from Xiaojun
+```{r}
+df_final = AB_NYC_2019_final
+quantile(df_final$price)
+```
+Build now the input quantities for the STAN file
+```{r}
+# We assign a g-prior over the continuous variables
+# reviews_per_month,calculated_host_listings_count, minimum_nights, months of total activitys
+df_final = df_final %>% mutate(avail_cat = case_when(availability_365==0 ~"Low", 
+                                      availability_365==1 ~"Medium", 
+                                      availability_365==2 ~"High"))
+df_final$months_of_activity = round(df_final$number_of_reviews/df_final$reviews_per_month)
+# X = matrix of continuous variables
+X = model.matrix(price ~-1 + reviews_per_month + calculated_host_listings_count +
+                  minimum_nights + months_of_activity, data=df_final)
+invXtX = solve(t(X)%*%X) # covariance matrix in the Zellen's g prior
+```
+Add now the dummy columns
+```{r}
+# Dummies for the Boroughs effects
+B = model.matrix(price ~-1 + neighbourhood_group, data=df_final)[,-1]
+# Dummies for the Neighbourhood effect
+NB = model.matrix(price ~-1 + neighbourhood, data=df_final)
+# Dummies for the room type
+RType = model.matrix(price ~-1 + room_type, data=df_final)[,-3]
+# Dummies for type of availability
+Av365 = model.matrix(price ~-1 + avail_cat, data=df_final)[,-1]
+# Dummies for individual vs couple renting
+df_final =df_final %>%
+  mutate(couple_renting = (stringr::str_detect(host_name, '&| And | Y |\\+| and ')*1))
+Couple = df_final$couple_renting
+```
+Finally, the words columns
+```{r}
+# Need to ask Xiaojun
+```
+And now, initialize the stan model, and run it
+```{r}
+N = dim(X)[1]
+y = log(df_final$price)
+# continuous vars
+p_cont = dim(X)[2]
+beta0 = rep(0, p_cont)
+# discrete vars
+p_borough = ncol(B)
+p_room = ncol(RType)
+p_avl = ncol(Av365)
+# Neighborhood
+p_neigh = ncol(NB)
+eta0 = rep(0, p_neigh)
+# Stan List
+stan_dat = list(N = N, 
+                y = y,
+                p_cont = p_cont,
+                X=X, 
+                invXtX=invXtX,
+                beta0=beta0,
+                p_borough = p_borough,
+                B=B,
+                p_room = p_room, 
+                RType= RType,
+                p_avl=p_avl,
+                Avl=Av365,
+                Couple=Couple,
+                p_neigh=p_neigh,
+                NB=NB,
+                eta0=eta0,
+                W=W,
+                E_W=E_W)
+```
+ 
+```{r}
+# And now, run the model...
+fit = stan('gWishart_model.stan', data = stan_dat, chains = 2, refresh = 0, verbose=TRUE)
+output = rstan::extract(fit)
+```
+
+
+```{r}
+stan_dat_reduced = list(N = N, 
+                y = y,
+                p_neigh=p_neigh,
+                NB=NB,
+                eta0=eta0,
+                W=W)
+# Reduced model
+fit_red = stan('gWishart_model_reduced.stan', data = stan_dat, chains = 2, refresh = 0, verbose=TRUE)
+output = rstan::extract(fit_red)
+```
+
+
+
+
 
 
 
