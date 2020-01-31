@@ -294,12 +294,17 @@ stan_dat_reduced = list(N = N,
                 eta0=eta0,
                 W=W)
 # Reduced model
-fit_red = stan('gWishart_model_reduced.stan', data = stan_dat, chains = 2, refresh = 0, verbose=TRUE)
+fit_red = stan('gWishart_model_reduced.stan', data = stan_dat, chains = 2, refresh = 0)
 output = rstan::extract(fit_red)
 ```
 
 
 
+```{r}
+delete = c(which(table(df_final$neighbourhood)==0))
+adjMat_voronoi = adjMat_voronoi[-delete, -delete]
+
+```
 
 
 
