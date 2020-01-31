@@ -1,0 +1,145 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+This file runs the model to deal with spacial autocorrelation. 
+```{r}
+library(tidyverse)
+library(ggpubr)
+require(rstan)
+library(rray)
+library(CARBayes)
+library(tictoc)
+```
+
+
+```{r}
+rm(list=ls())
+load('AB_NYC_2019_final.rdata')#from xiaojun
+data=AB_NYC_2019_final
+df=data
+load("~/Case-Study-2-team-7/adjMat_voronoi.Rdata")#W
+data$months_of_activity=data$number_of_reviews/data$reviews_per_month
+data =data %>%
+  mutate(couple_renting = (stringr::str_detect(host_name, '&| And | Y |\\+| and ')*1 )) 
+identical(rownames(W),colnames(W))
+sum(is.na(data))+sum(apply(data,2,is.infinite))#no na/inf
+length(unique(data$neighbourhood))
+```
+
+```{r}
+neighbr_names = sort(unique(data$neighbourhood))
+# Step 1 - compute mean latitude and longitude
+df_ng_max = data %>%
+  group_by(neighbourhood) %>%
+  dplyr::summarize_at(c("longitude", "latitude"), max, na.rm=TRUE)
+df_ng_min = data %>%
+  group_by(neighbourhood) %>%
+  dplyr::summarize_at(c("longitude", "latitude"), min, na.rm=TRUE)
+df_ng = left_join(df_ng_max, df_ng_min, by=c("neighbourhood"))
+# Step 2 - initialize the adjacency matrix
+adjMat = diag(length(neighbr_names))
+colnames(adjMat) = rownames(adjMat) = neighbr_names
+# Step 3 - Insert the respective measures of distance
+for(n in neighbr_names){
+  # Subtract max/min latitude and longitude from each point
+  neig_index = which(df_ng$neighbourhood==n)
+  neigh_allpoints = data[data$neighbourhood==n, ]
+  neigh = df_ng[df_ng$neighbourhood==n,]
+  neigh[,c(1,2,3,4,5)] = neigh[,c(1,4,5,2,3)] 
+  reduced_distances = (abs(as.matrix(df_ng[-1])%b-% matrix(unlist(c(neigh)[-1]), 1))<0.005)*1
+  # Check if the adjacency exists
+  for(d in 1:4){
+    candidates = which(reduced_distances[,d]==1)
+    for(candidate in candidates){
+      candidate_ng = data[data$neighbourhood==neighbr_names[candidate], ]
+      if(d==1){
+        # Min Long neigh similar to Max Long candidate ng candidate
+        coord_ng = as.vector(neigh_allpoints[neigh_allpoints$longitude == min(neigh_allpoints$longitude),c(7,8)][1,])
+        coord_ng_candidate = as.vector(candidate_ng[candidate_ng$longitude == max(candidate_ng$longitude),c(7,8)][1,])
+      } else if(d==2){
+          # Min Lat neigh similar to Max Lat candidate ng candidate
+        coord_ng = as.vector(neigh_allpoints[neigh_allpoints$latitude == min(neigh_allpoints$latitude),c(7,8)][1,])
+        coord_ng_candidate = as.vector(candidate_ng[candidate_ng$latitude == max(candidate_ng$latitude),c(7,8)][1,])
+      } else if(d==3){
+        # Max Long neigh similar to Min Long candidate ng candidate
+        coord_ng = as.vector(neigh_allpoints[neigh_allpoints$longitude == max(neigh_allpoints$longitude),c(7,8)][1,])
+        coord_ng_candidate = as.vector(candidate_ng[candidate_ng$longitude == min(candidate_ng$longitude),c(7,8)][1,])
+      } else {
+        # Max Lat neigh similar to Min Lat candidate ng candidate
+        coord_ng = as.vector(neigh_allpoints[neigh_allpoints$latitude == max(neigh_allpoints$latitude),c(7,8)][1,])
+        coord_ng_candidate = as.vector(candidate_ng[candidate_ng$latitude == min(candidate_ng$latitude),c(7,8)][1,])
+      }
+        # Compute euclidean distance between the selected points
+        dist = as.integer((sqrt((coord_ng[1]-coord_ng_candidate[1])^2 + (coord_ng[2]-coord_ng_candidate[2])^2)<0.02)*1)
+        # Include the value in the matrix
+        adjMat[neig_index, candidate] = dist
+    }
+  }  
+}
+W=adjMat 
+
+#And check that W is all right
+
+# Check if symmetric
+for(n in 1:length(neighbr_names)){
+  row = W[n,]
+  col = W[,n]
+  if(sum(row==col)!=217){
+    diff = which(row!=col)
+    for(d in diff){
+      W[n,d] = W[d,n] = 0
+    }
+  }
+}
+# Check if repeated columns
+which(duplicated(W) | duplicated(W[nrow(W):1, ])[nrow(W):1])
+dup = W[,c(which(duplicated(W) | duplicated(W[nrow(W):1, ])[nrow(W):1]))]
+# Fix repeated columns (by hand...)
+W[2,102] = W[102,2] = 0 # Huguenot and Arden Heights do not strictly match
+W[68,4] = W[4,68] = 1 # Edgemere and Arverne are connected
+W[90,121 ] = W[121 ,90] = 0 # manhattan beach is not close to Gravesand
+W[213,138 ] = W[138,213] = 1 # whitestone is connected to murray hill
+W[213,9 ] = W[9,213] = 1 #whitestone is connected to bay terrace
+W[212,123 ] = W[123,212] = 1 #Marines harbor is connected to westerleigh
+# Compute E_W
+E_W = diag(apply(W, 2, sum))
+# test Inveribility
+u = runif(1)
+s = solve(E_W - u*W)
+
+    #Use voronoi tasellation
+
+library(caramellar)
+# Sample (with replacement) 10 points for each neighbourhood
+adjMat_final  = matrix(0, nrow=217, ncol=217)
+nSamples =1000
+for(trial in 1:nSamples){
+  # Sample one point in each neighborhoods
+  coord_neighs = data %>% 
+    dplyr::select(neighbourhood, latitude, longitude) %>% 
+    group_by(neighbourhood) %>% sample_n(1) 
+  # compute the voronoi adjacency
+  W_voronoi = voronoi_adjacency(coord_neighs, formula = neighbourhood ~ latitude + longitude)
+  adjMat_voronoi = (W_voronoi$Adjacencies)*1
+  diag(adjMat_voronoi) = rep(1, 217)
+  colnames(adjMat_voronoi) = rownames(adjMat_voronoi) = neighbr_names
+  # Sum it with the previous ones
+  adjMat_final = adjMat_final + adjMat_voronoi
+}
+
+```
+
+
+CarBayes
+```{r}
+index_area=sapply(data$neighbourhood,function(x){which(rownames(adjMat_voronoi)==x)})
+tic('car_new')
+car_new=S.CARmultilevel(log(price) ~ neighbourhood_group + months_of_activity + availability_365 + reviews_per_month +calculated_host_listings_count+minimum_nights+room_type+couple_renting-1,'gaussian',data=data,ind.area = index_area,W=adjMat_voronoi,burnin = 10000,n.sample = 100000,thin = 1)
+toc()
+tic('car_popularity')
+car_pop=S.CARmultilevel(reviews_per_month ~ neighbourhood_group + months_of_activity + availability_365 + log(price) +calculated_host_listings_count+minimum_nights+room_type+couple_renting-1,'gaussian',data=data,ind.area = index_area,W=adjMat_voronoi,burnin = 10000,n.sample = 100000,thin = 1)
+toc()
+saveRDS(car_new,'CAR_price.RData')
+saveRDS(car_pop,'CAR_popularity.RData')
+```
