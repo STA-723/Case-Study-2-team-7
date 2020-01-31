@@ -163,7 +163,7 @@ corpus <- Corpus(sourceData)
 
 corpus <- tm_map(corpus, content_transformer(tolower)) # convert to lowercase
 #corpus <- tm_map(corpus, removeNumbers) # remove digits
-#corpus <- tm_map(corpus, removePunctuation) # remove punctuation
+corpus <- tm_map(corpus, removePunctuation) # remove punctuation
 #corpus <- tm_map(corpus, stripWhitespace) # strip extra whitespace
 corpus <- tm_map(corpus, removeWords, stopwords('english')) # remove stopwords, such as "a", "the", "at", etc.
 
@@ -232,7 +232,7 @@ summary(mod.lm) ### not able to tell the coefficents o corresponds to which word
 
 Should we include the other predictors for controlling? The top 10 words do not seem to be important (expect luxury)?
 ```{r cache=TRUE}
-library(lm.beta)
+#library(lm.beta)
 # #Time the creationg of the Linear Model
 # st <- Sys.time()
 # mod.lm_freq <- lm(log(price+0.01)~.,data=tdm2)
@@ -260,7 +260,14 @@ tdm2_other$last_review_ori<-AB_subset$last_review
 tdm2_other$reviews_per_month_ori<-AB_subset$reviews_per_month
 tdm2_other$calculated_host_listings_count_ori<-AB_subset$calculated_host_listings_count
 tdm2_other$availablity_365_ori<-AB_subset$availability_365
+tdm2_other<- tdm2_other %>% dplyr::select(-c(apartment, studio, manhattan, williamsburg, apt, bklyn, brooklyn))
 
+neighbourhood_remove<- unique(tolower(AB_subset$neighbourhood)) # convert to lowercase
+#corpus <- tm_map(corpus, removeNumbers) # remove digits
+#removePunctuation(AB_subset$neighbourhood)
+### remove neighbborhood names
+sum(colnames(tdm2_other) %in% neighbourhood_remove)
+tdm2_other<- tdm2_other %>% dplyr::select(-c(midtown, chelsea, harlem, greenpoint, nolita, soho, flatbush, gramercy, chinatown, astoria, bushwick, sunnyside, ridgewood, riverdale, flushing, tribeca, gowanus, noho, kensington, woodside, midwood, bensonhurst, bayside, dumbo, inwood, jamaica, elmhurst))
 
 ### I only include the words which appear at leasr 8 times. 
 
@@ -270,17 +277,20 @@ coef_other<- as.data.frame(coef_other$coefficients)
 
 
 coef_other_sort<- coef_other[order(coef_other$`t value`, decreasing = T),]
-coef_other_sort[1:25,]
-exp(coef_other_sort[1:25,])
+important_price<- coef_other_sort[1:100,]
+#exp(coef_other_sort[1:25,])
 #### RUN THE LINE ABOVE FOR IMPORTANT WORDS FOR PRICE!!!!!!!
 
+
+AB_NYC_2019_price<- cbind(AB_NYC_2019, tdm2_other[colnames(tdm2_other) %in% rownames(important_price)])
+save(AB_NYC_2019_price, file="AB_NYC_2019_price")
 
 ### not standardize
 #st_coef_other<- lm.beta(mod.lm_freq_other)
 #st_coef_other$standardized.coefficients[order(st_coef_other$standardized.coefficients, decreasing = T)[1:20]] 
 
 ### check the original names which include the important words
-AB_NYC_2019$name[grep("sonder", AB_NYC_2019$name, ignore.case=TRUE)]
+#AB_NYC_2019$name[grep("penthouse", AB_NYC_2019$name, ignore.case=TRUE)]
 ```
 
 ### popularity
@@ -291,14 +301,16 @@ coef_other<- as.data.frame(coef_other$coefficients)
 
 
 coef_other_sort<- coef_other[order(coef_other$`t value`, decreasing = T),]
-coef_other_sort[1:25,] 
+important_popoularity<- coef_other_sort[1:100,] 
 exp(coef_other_sort[1:25,])
+
+AB_NYC_2019_popularity<- cbind(AB_NYC_2019, tdm2_other[colnames(tdm2_other) %in% rownames(important_popularity)])
 #### RUN THE LINE ABOVE FOR IMPORTANT WORDS FOR POPULARITY!!!!!!!
 
 #st_coef_other<- lm.beta(mod.lm_freq_other)
 #st_coef_other$standardized.coefficients[order(st_coef_other$standardized.coefficients, decreasing = T)[1:20]] 
 
 ### check the original names which include the important words
-AB_NYC_2019$name[grep("garden-midtown1stop-breakfast", AB_NYC_2019$name, ignore.case=TRUE)]
+AB_NYC_2019$name[grep("couples", AB_NYC_2019$name, ignore.case=TRUE)]
 
 ```
