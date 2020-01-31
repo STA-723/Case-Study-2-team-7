@@ -81,6 +81,7 @@ corrplot(corr,number.cex=.8, upper="ellipse")
 ```{r cache=TRUE}
 load("C:/Users/XJ/OneDrive - Duke University/STA-723/Case-Study-2-team-7/AB_NYC_2019_final.rdata")
 AB_NYC_2019<- AB_NYC_2019_final
+AB_NYC_2019$months_of_activity<- round(AB_NYC_2019$number_of_reviews/AB_NYC_2019$reviews_per_month)
 AB_subset<- AB_NYC_2019
 
 max(AB_NYC_2019$price)
@@ -254,7 +255,7 @@ tdm2_other<- tdm2
 tdm2_other$neighbourhood_group_ori<-AB_subset$neighbourhood_group
 tdm2_other$room_type_ori<-AB_subset$room_type
 tdm2_other$minimum_night_ori<-AB_subset$minimum_nights
-#tdm2_other$numer_of_reviews_ori<-AB_subset$number_of_reviews
+tdm2_other$months_of_activity_ori<-AB_subset$months_of_activity
 tdm2_other$last_review_ori<-AB_subset$last_review
 tdm2_other$reviews_per_month_ori<-AB_subset$reviews_per_month
 tdm2_other$calculated_host_listings_count_ori<-AB_subset$calculated_host_listings_count
@@ -263,13 +264,14 @@ tdm2_other$availablity_365_ori<-AB_subset$availability_365
 
 ### I only include the words which appear at leasr 8 times. 
 
-mod.lm_freq_other<- lm(log(price+0.01)~.,data=tdm2_other)
+mod.lm_freq_other<- lm(log(price)~.,data=tdm2_other)
 coef_other<- summary(mod.lm_freq_other)
 coef_other<- as.data.frame(coef_other$coefficients)
 
 
 coef_other_sort<- coef_other[order(coef_other$`t value`, decreasing = T),]
 coef_other_sort[1:25,]
+exp(coef_other_sort[1:25,])
 #### RUN THE LINE ABOVE FOR IMPORTANT WORDS FOR PRICE!!!!!!!
 
 
@@ -283,13 +285,14 @@ AB_NYC_2019$name[grep("sonder", AB_NYC_2019$name, ignore.case=TRUE)]
 
 ### popularity
 ```{r}
-mod.lm_freq_other<- lm(log(reviews_per_month_ori+0.01)~.,data=tdm2_other)
+mod.lm_freq_other<- lm(log(reviews_per_month_ori)~.,data=tdm2_other)
 coef_other<- summary(mod.lm_freq_other)
 coef_other<- as.data.frame(coef_other$coefficients)
 
 
 coef_other_sort<- coef_other[order(coef_other$`t value`, decreasing = T),]
 coef_other_sort[1:25,] 
+exp(coef_other_sort[1:25,])
 #### RUN THE LINE ABOVE FOR IMPORTANT WORDS FOR POPULARITY!!!!!!!
 
 #st_coef_other<- lm.beta(mod.lm_freq_other)
